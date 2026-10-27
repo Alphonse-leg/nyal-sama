@@ -248,20 +248,36 @@ def predict(p):
    v=os.environ.get(n,'').strip()
    if v: msg=msg.replace(v,'[REDACTED]')
   print(f'Horoscope summary Gemini failed; using search snippets only: {type(exc).__name__}: {msg[:500]}')
-  snippets=[re.sub(r'\s+',' ',x.get('snippet','')).strip() for x in results]
-  # 簡易まとめでも英語や占いに無関係な説明文を表示しない。
-  snippets=[x for x in snippets if x and re.search(r'[ぁ-んァ-ヶ一-龯]', x)
-            and any(term in (x+' '+results[i].get('title','')) for term in
-                    ('運勢','星占い','占い','星座','ラッキー','金運','恋愛運','仕事運',
-                     'おひつじ座','おうし座','ふたご座','かに座','しし座','おとめ座',
-                     'てんびん座','さそり座','いて座','やぎ座','みずがめ座','うお座',
-                     '牡羊座','牡牛座','双子座','蟹座','獅子座','乙女座','天秤座',
-                     '蠍座','射手座','山羊座','水瓶座','魚座')) for i,x in enumerate(snippets)]
+  # Gemini がタイムアウトしても、検索結果の説明文だけで代替表示する。
+  # 不完全な検索結果や None が混ざっても、代替処理自体が例外にならないようにする。
+  relevant_terms=(
+   '運勢','星占い','占い','星座','ラッキー','金運','恋愛運','仕事運',
+   'おひつじ座','おうし座','ふたご座','かに座','しし座','おとめ座',
+   'てんびん座','さそり座','いて座','やぎ座','みずがめ座','うお座',
+   '牡羊座','牡牛座','双子座','蟹座','獅子座','乙女座','天秤座',
+   '蠍座','射手座','山羊座','水瓶座','魚座'
+  )
+  snippets=[]
+  for item in results if isinstance(results, (list, tuple)) else []:
+   if not isinstance(item, dict):
+    continue
+   title=str(item.get('title') or '').strip()
+   snippet=' '.join(str(item.get('snippet') or '').split())
+   combined=title+' '+snippet
+   if snippet and re.search(r'[ぁ-んァ-ヶ一-龯]', combined) and any(term in combined for term in relevant_terms):
+    snippets.append(snippet)
   if snippets:
-   summary='検索結果の説明文をもとにした簡易まとめニャ。\n' + '\n'.join(f'・{x[:260]}' for x in snippets[:4]) + '\n\n検索結果の説明文に基づくため、各サイトの本文を確認するとより詳しく読めるニャ。'
+   summary='検索結果の説明文をもとにした簡易まとめニャ。\\n' + '\\n'.join(f'・{x[:260]}' for x in snippets[:4]) + '\\n\\nこれは検索結果の説明文に基づく簡易版ニャ。詳しい内容は下の出典サイトで確認してほしいニャ。'
   else:
    summary='検索結果は見つかったものの、説明文を十分に取得できなかったニャ。下の出典サイトを開いて今日の運勢を確認してほしいニャ。'
- sources='\n'.join(f"{x['title']}|{x['url']}" for x in results)
+  source_lines=[]
+  for item in results if isinstance(results, (list, tuple)) else []:
+   if isinstance(item, dict):
+    title=str(item.get('title') or '占いサイト').replace('|','｜').replace('\\n',' ')
+    url=str(item.get('url') or '').strip()
+    if url.startswith(('https://','http://')):
+     source_lines.append(f'{title}|{url}')
+  sources='\\n'.join(source_lines)
  return f'【{today}・{sign}の今日の運勢】\n{summary}',sources
 @app.before_request
 def csrf():

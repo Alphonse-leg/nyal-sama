@@ -43,7 +43,7 @@ def ask(contents,system,tokens=450):
 
  # クライアントを明示的な変数に保持し、通信完了後にだけ閉じる。
  # 生成リクエストの前に閉じたクライアントを参照してしまう状態を避ける。
- client = genai.Client(api_key=api_key)
+ client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=12000))
  try:
   response = client.models.generate_content(
    model=MODEL,
@@ -115,7 +115,7 @@ def search_horoscopes(sign):
  for engine,url in engines:
   try:
    req=urllib.request.Request(url,headers=headers)
-   with urllib.request.urlopen(req,timeout=15) as response:
+   with urllib.request.urlopen(req,timeout=6) as response:
     raw=response.read(1_500_000)
     charset=response.headers.get_content_charset() or 'utf-8'
    body=raw.decode(charset,'replace')

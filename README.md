@@ -16,3 +16,7 @@ ZIPファイルそのものではなく、ZIPを展開した中身をリポジ�
 **`.env` と `nyalsama.db` は含めていません。APIキーや個人の会話履歴をGitHubへ公開しないためです。** `.env.example` はサンプルなので実際のAPIキーは入れず、Renderの Environment に `GEMINI_API_KEY` を登録してください。
 
 既存リポジトリにアップロードするときは、先に現在の状態をバックアップしてください。`app.py` と `templates/` の既存ファイルを更新するため、現在の公開版と内容が入れ替わる場合があります。アップロード後、RenderのLogsでデプロイ完了を確認してください。
+
+
+## 内部エラー修正
+Render/Gunicorn 起動時に `__main__` が実行されず、SQLite の `profile` テーブルが作られない問題を修正しました。アプリの読み込み時に `init_db()` を実行します。既存テーブルは `IF NOT EXISTS`、プロフィール初期行は `INSERT OR IGNORE` で処理し、既存データを削除しません。

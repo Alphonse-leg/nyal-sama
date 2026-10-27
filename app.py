@@ -24,6 +24,10 @@ def init_db():
   if 'zodiac' not in cols: c.execute("ALTER TABLE profile ADD COLUMN zodiac TEXT NOT NULL DEFAULT ''")
   pcols={r['name'] for r in c.execute('PRAGMA table_info(predictions)').fetchall()}
   if 'sources' not in pcols: c.execute("ALTER TABLE predictions ADD COLUMN sources TEXT NOT NULL DEFAULT ''")
+# Render/Gunicorn では __main__ が実行されないため、アプリ読込時にDB初期化を行う。
+# CREATE TABLE IF NOT EXISTS と INSERT OR IGNORE を使うため、既存データは消さない。
+init_db()
+
 def profile():
  with db() as c: return c.execute('SELECT * FROM profile WHERE id=1').fetchone()
 def add(role,body):

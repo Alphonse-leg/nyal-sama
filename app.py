@@ -142,15 +142,33 @@ def search_horoscopes(sign):
       from html import unescape
       snippet=' '.join(unescape(snippet).split())
       found.append({'title':title,'url':link,'snippet':snippet})
+   # 占いと無関係な英語ページ（礼拝案内・聖書など）を除外する。
+   # 日本語を含み、星座・運勢に関する語がある結果だけ採用する。
+   relevant_terms=('運勢','星占い','占い','星座','ラッキー','金運','恋愛運','仕事運',
+                   'おひつじ座','おうし座','ふたご座','かに座','しし座','おとめ座',
+                   'てんびん座','さそり座','いて座','やぎ座','みずがめ座','うお座',
+                   '牡羊座','牡牛座','双子座','蟹座','獅子座','乙女座','天秤座',
+                   '蠍座','射手座','山羊座','水瓶座','魚座')
    out=[]; seen=set()
    for item in found:
     link=item['url']
+    title=' '.join(item.get('title','').split())
+    snippet=' '.join(item.get('snippet','').split())
+    combined=title+' '+snippet
+    has_japanese=bool(re.search(r'[ぁ-んァ-ヶ一-龯]', combined))
+    is_horoscope=any(term in combined for term in relevant_terms)
+    if not has_japanese or not is_horoscope:
+     continue
     if link in seen: continue
-    seen.add(link); out.append(item)
+    seen.add(link)
+    item['title']=title
+    item['snippet']=snippet
+    out.append(item)
     if len(out)>=6: break
    if out:
-    print(f'Horoscope search: {engine} returned {len(out)} results')
+    print(f'Horoscope search: {engine} returned {len(out)} relevant Japanese results')
     return out
+   failures.append(f'{engine}: no relevant Japanese horoscope results')
    failures.append(f'{engine}: no parseable results (HTTP response received)')
   except Exception as exc:
    failures.append(f'{engine}: {type(exc).__name__}: {str(exc)[:180]}')
@@ -164,7 +182,7 @@ def predict(p):
  if not key(): raise RuntimeError('Gemini APIキーが設定されていません。')
  today=date.today().strftime('%Y年%m月%d日')
  results=search_horoscopes(sign)
- if not results: raise RuntimeError('占いサイトの検索結果を取得できませんでした。ネット接続を確認して、もう一度試してニャ。')
+ if not results: raise RuntimeError('日本語の星占い検索結果を見つけられなかったニャ。少し時間をおいて、もう一度試してニャ。')
  source_text='\n'.join(f"{i+1}. {x['title']}\nURL: {x['url']}\n検索結果の説明: {x.get('snippet','（説明文なし）')}" for i,x in enumerate(results))
  prompt=f'''以下はウェブ検索で見つけた占いサイトの検索結果です。内容に書かれていないことを事実のように作らず、複数の結果に共通する傾向を中心に日本語で要約してください。対象日:{today}、星座:{sign}。全体運・対人運・仕事運/学業運・金運・ラッキーアドバイスを簡潔にまとめてください。検索結果だけでは根拠が足りない項目は「情報なし」としてください。占いは娯楽として楽しむもので、医療・金銭などの重要判断を促さないでください。\n\n検索結果:\n{source_text}'''
  # Gemini呼び出しは既存の ask() をそのまま使用する。
@@ -180,7 +198,14 @@ def predict(p):
    if v: msg=msg.replace(v,'[REDACTED]')
   print(f'Horoscope summary Gemini failed; using search snippets only: {type(exc).__name__}: {msg[:500]}')
   snippets=[re.sub(r'\s+',' ',x.get('snippet','')).strip() for x in results]
-  snippets=[x for x in snippets if x]
+  # 簡易まとめでも英語や占いに無関係な説明文を表示しない。
+  snippets=[x for x in snippets if x and re.search(r'[ぁ-んァ-ヶ一-龯]', x)
+            and any(term in (x+' '+results[i].get('title','')) for term in
+                    ('運勢','星占い','占い','星座','ラッキー','金運','恋愛運','仕事運',
+                     'おひつじ座','おうし座','ふたご座','かに座','しし座','おとめ座',
+                     'てんびん座','さそり座','いて座','やぎ座','みずがめ座','うお座',
+                     '牡羊座','牡牛座','双子座','蟹座','獅子座','乙女座','天秤座',
+                     '蠍座','射手座','山羊座','水瓶座','魚座')) for i,x in enumerate(snippets)]
   if snippets:
    summary='検索結果の説明文をもとにした簡易まとめニャ。\n' + '\n'.join(f'・{x[:260]}' for x in snippets[:4]) + '\n\n検索結果の説明文に基づくため、各サイトの本文を確認するとより詳しく読めるニャ。'
   else:

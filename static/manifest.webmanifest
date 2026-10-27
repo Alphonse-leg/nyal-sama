@@ -1,0 +1,14 @@
+{
+  "name": "大預言猫ニャル様",
+  "short_name": "ニャル様",
+  "description": "猫の預言者ニャル様と話して、今日の運勢を楽しもう。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f2fa",
+  "theme_color": "#34244a",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}記憶の管理｜大預言猫ニャル様{% endblock %}
+{% block content %}
+<section class="memory-intro"><p class="eyebrow">MEMORY ROOM</p><h1>ニャル様の記憶を育てる</h1><p>そなたのことを教えるがよい。ここに保存した内容は、このPCのローカルデータベースに保存されるニャ。いつでも見直し・変更・消去できるぞ。星座は「今日の運勢」を調べるときに使うニャ。</p></section>
+<form class="panel memory-form" method="post" action="{{ url_for('memory') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="zodiac">星座（今日の運勢に使用）</label><select id="zodiac" name="zodiac"><option value="">星座を選んでニャ</option>{% for sign in ['おひつじ座','おうし座','ふたご座','かに座','しし座','おとめ座','てんびん座','さそり座','いて座','やぎ座','みずがめ座','うお座'] %}<option value="{{ sign }}" {% if profile['zodiac'] == sign %}selected{% endif %}>{{ sign }}</option>{% endfor %}</select>
+  <label for="username">呼び名 <span>（必須ではない）</span></label><input id="username" name="username" maxlength="80" value="{{ profile['username'] }}" placeholder="例：○○、ニックネームなど">
+  <label for="hobbies">趣味・関心</label><textarea id="hobbies" name="hobbies" maxlength="1000" rows="3" placeholder="好きなこと、よく話すテーマなど">{{ profile['hobbies'] }}</textarea>
+  <label for="preferences">会話の好み</label><textarea id="preferences" name="preferences" maxlength="1000" rows="3" placeholder="例：気軽な口調が好き、短い手順で教えてほしい">{{ profile['preferences'] }}</textarea>
+  <label for="thinking_style">考え方・判断の傾向</label><textarea id="thinking_style" name="thinking_style" maxlength="1000" rows="3" placeholder="例：まず試してから改善する、費用を抑えて進めたい">{{ profile['thinking_style'] }}</textarea>
+  <label for="notes">覚えておきたいこと <span>（任意）</span></label><textarea id="notes" name="notes" maxlength="1500" rows="4" placeholder="今後の会話で覚えておいてほしいこと">{{ profile['notes'] }}</textarea>
+  <p class="hint">コツ：AIが勝手に決めつけるのではなく、本人が書いたことを中心に記憶する設計を目指すニャ。</p>
+  <div class="form-actions"><button class="primary" type="submit">記憶を保存する</button><a class="text-link" href="{{ url_for('index') }}">お告げの間へ戻る</a></div>
+</form>
+<section class="danger-zone"><div><strong>プロフィール記憶の消去</strong><p>呼び名・趣味・会話の好み・考え方・メモを空にします。会話と予言の履歴は残ります。</p></div><form method="post" action="{{ url_for('delete_memory') }}" onsubmit="return confirm('プロフィールの記憶を消去します。よろしいですか？');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="subtle-danger" type="submit">記憶を消去</button></form></section>
+{% endblock %}

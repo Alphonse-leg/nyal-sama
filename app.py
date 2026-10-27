@@ -98,6 +98,52 @@ class DDGResults(HTMLParser):
    self.target['snippet']=' '.join(''.join(self.buf).split())
    self.capture=None; self.target=None; self.buf=[]
 
+
+class PlainTextParser(HTMLParser):
+ def __init__(self):
+  super().__init__(); self.parts=[]; self.skip=0
+ def handle_starttag(self,tag,attrs):
+  if tag in ('script','style','noscript','svg'): self.skip+=1
+ def handle_endtag(self,tag):
+  if tag in ('script','style','noscript','svg') and self.skip: self.skip-=1
+  elif tag in ('p','div','li','br','h1','h2','h3','tr'): self.parts.append('\n')
+ def handle_data(self,data):
+  if not self.skip:
+   value=' '.join(data.split())
+   if value: self.parts.append(value)
+
+def direct_japanese_fallback(sign):
+ """Try a known Japanese horoscope page if general search engines fail."""
+ # Web-さんいんの星座別週間運勢ページ。番号は黄道12星座の順。
+ codes={name:f'{i:02d}' for i,name in enumerate(ZODIAC_SIGNS,1)}
+ code=codes.get(sign)
+ if not code: return []
+ url=f'https://www.web-sanin.co.jp/amuse/astrol/update/daily/{code}.html'
+ headers={'User-Agent':'Mozilla/5.0 (compatible; NyalSama/1.0)','Accept-Language':'ja-JP,ja;q=0.9'}
+ try:
+  req=urllib.request.Request(url,headers=headers)
+  with urllib.request.urlopen(req,timeout=5) as response:
+   raw=response.read(900_000)
+   charset=response.headers.get_content_charset() or 'utf-8'
+  html=raw.decode(charset,'replace')
+  parser=PlainTextParser(); parser.feed(html)
+  text=' '.join(' '.join(parser.parts).split())
+  # Require a Japanese horoscope page with the requested sign; do not accept generic pages.
+  if not any(x in text for x in (sign, sign.replace('お',''))): return []
+  if not any(x in text for x in ('運勢','ラッキーカラー','ラッキーアイテム')): return []
+  today=date.today()
+  date_forms=(f'{today.month}月{today.day}日', f'{today.month}月{today.day}日（', f'{today.month}月{today.day}日(')
+  pos=next((text.find(x) for x in date_forms if text.find(x)>=0),-1)
+  if pos>=0:
+   snippet=text[max(0,pos-100):pos+1000]
+  else:
+   snippet=text[:1200]
+  snippet=' '.join(snippet.split())
+  return [{'title':f'Web-さんいん 星占い {sign}', 'url':url, 'snippet':snippet}]
+ except Exception as exc:
+  print(f'Direct Japanese horoscope fallback failed: {type(exc).__name__}: {str(exc)[:160]}')
+  return []
+
 def search_horoscopes(sign):
  """Search horoscope pages with DuckDuckGo first, then Bing RSS as a fallback."""
  today=date.today().strftime('%Y年%m月%d日')
@@ -172,6 +218,11 @@ def search_horoscopes(sign):
    failures.append(f'{engine}: no parseable results (HTTP response received)')
   except Exception as exc:
    failures.append(f'{engine}: {type(exc).__name__}: {str(exc)[:180]}')
+ direct=direct_japanese_fallback(sign)
+ if direct:
+  print('Horoscope search: direct Japanese horoscope source returned 1 result')
+  return direct
+ failures.append('Direct Japanese horoscope page: no usable content')
  print('Horoscope search failed: ' + ' | '.join(failures)[:700])
  return []
 

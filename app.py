@@ -1,4 +1,257 @@
-from app_gemini_client_lifecycle_fixed import app
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort
+import os, sqlite3, secrets, re, hashlib, urllib.parse, urllib.request
+from html.parser import HTMLParser
+from datetime import datetime, date
+import xml.etree.ElementTree as ET
+BASE=os.path.dirname(os.path.abspath(__file__))
+try:
+ from dotenv import load_dotenv
+ load_dotenv(os.path.join(BASE,'.env'), override=False)
+except ImportError: pass
+DB=os.path.join(BASE,'nyalsama.db')
+MODEL=os.environ.get('GEMINI_MODEL','gemini-3.7-flash').strip()
+app=Flask(__name__); app.secret_key=os.environ.get('NYALSAMA_SECRET_KEY') or secrets.token_hex(32)
+def db():
+ # Browser-session scoped database: visitors do not share profile/chat history.
+ tenant = session.get('tenant_id', 'bootstrap')
+ safe = hashlib.sha256(tenant.encode('utf-8')).hexdigest()[:24]
+ path = os.path.join(BASE, 'data', f'nyalsama_{safe}.db')
+ os.makedirs(os.path.dirname(path), exist_ok=True)
+ c=sqlite3.connect(path); c.row_factory=sqlite3.Row; return c
+def init_db():
+ with db() as c:
+  c.executescript("""CREATE TABLE IF NOT EXISTS profile(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT NOT NULL DEFAULT '',hobbies TEXT NOT NULL DEFAULT '',preferences TEXT NOT NULL DEFAULT '',thinking_style TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '');
+  INSERT OR IGNORE INTO profile(id,username) VALUES(1,'');
+  CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,role TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY AUTOINCREMENT,prediction TEXT NOT NULL,result TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);""")
+  # 既存DBを壊さず、新しい列だけを追加する。
+  cols={r['name'] for r in c.execute('PRAGMA table_info(profile)').fetchall()}
+  if 'zodiac' not in cols: c.execute("ALTER TABLE profile ADD COLUMN zodiac TEXT NOT NULL DEFAULT ''")
+  pcols={r['name'] for r in c.execute('PRAGMA table_info(predictions)').fetchall()}
+  if 'sources' not in pcols: c.execute("ALTER TABLE predictions ADD COLUMN sources TEXT NOT NULL DEFAULT ''")
+def profile():
+ with db() as c: return c.execute('SELECT * FROM profile WHERE id=1').fetchone()
+def add(role,body):
+ with db() as c: c.execute('INSERT INTO messages(role,body,created_at) VALUES(?,?,?)',(role,body,datetime.now().strftime('%Y-%m-%d %H:%M')))
+def key(): return (os.environ.get('GOOGLE_API_KEY') or os.environ.get('GEMINI_API_KEY') or '').strip()
+def ask(contents,system,tokens=450):
+ from google import genai
+ from google.genai import types
 
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=False)
+ api_key = key()
+ if not api_key:
+  raise RuntimeError('Gemini APIキーが設定されていません。')
+
+ # クライアントを明示的な変数に保持し、通信完了後にだけ閉じる。
+ # 生成リクエストの前に閉じたクライアントを参照してしまう状態を避ける。
+ client = genai.Client(api_key=api_key)
+ try:
+  response = client.models.generate_content(
+   model=MODEL,
+   contents=contents,
+   config=types.GenerateContentConfig(
+    system_instruction=system,
+    temperature=0.9,
+    max_output_tokens=tokens
+   )
+  )
+  return (response.text or '').strip()
+ finally:
+  close = getattr(client, 'close', None)
+  if callable(close):
+   close()
+def reply(text):
+ if key():
+  try:
+   p=profile()
+   with db() as c: hist=c.execute('SELECT role,body FROM messages ORDER BY id DESC LIMIT 12').fetchall()
+   contents=[{'role':'user' if x['role']=='user' else 'model','parts':[{'text':x['body']}]} for x in reversed(hist)]
+   prompt=f'あなたは大預言猫ニャル様。偉そうで愛嬌のある猫の預言者として自然な日本語で会話し、時々ニャを使う。落ち込んだ人には優しくする。怖い予言や重要判断への誘導は禁止。保存プロフィール: 呼び名:{p["username"] or "不明"} 趣味:{p["hobbies"] or "不明"} 好み:{p["preferences"] or "不明"} 考え方:{p["thinking_style"] or "不明"} メモ:{p["notes"] or "なし"}'
+   out=ask(contents or text,prompt)
+   if out:return out[:4000]
+  except Exception as e:
+   msg=str(e)
+   for n in ('GOOGLE_API_KEY','GEMINI_API_KEY'):
+    v=os.environ.get(n,'').strip()
+    if v:msg=msg.replace(v,'[REDACTED]')
+   print(f'Gemini API call failed: {type(e).__name__}: {msg[:1000]}')
+   return 'むむっ、Geminiとの通信に失敗したニャ。黒い画面の診断メッセージを確認してほしいニャ。'
+ return 'フフフ……余の宇宙ひげが何かを感じ取ったぞ。もう少し詳しく話してみるがよいニャ！ （APIキー未設定のため定型文で返答中）'
+ZODIAC_SIGNS=('おひつじ座','おうし座','ふたご座','かに座','しし座','おとめ座','てんびん座','さそり座','いて座','やぎ座','みずがめ座','うお座')
+
+class DDGResults(HTMLParser):
+ def __init__(self):
+  super().__init__(); self.results=[]; self.current=None; self.capture=None; self.buf=[]; self.target=None
+ def handle_starttag(self,tag,attrs):
+  a=dict(attrs); cls=a.get('class','')
+  if tag=='a' and 'result__a' in cls:
+   self.current={'title':'','url':a.get('href',''),'snippet':''}; self.results.append(self.current)
+   self.capture='title'; self.target=self.current; self.buf=[]
+  elif 'result__snippet' in cls and self.results:
+   self.capture='snippet'; self.target=self.results[-1]; self.buf=[]
+ def handle_data(self,data):
+  if self.capture: self.buf.append(data)
+ def handle_endtag(self,tag):
+  if self.capture=='title' and tag=='a':
+   if self.target is not None: self.target['title']=' '.join(''.join(self.buf).split())
+   self.capture=None; self.target=None; self.buf=[]
+  elif self.capture=='snippet' and self.target is not None:
+   self.target['snippet']=' '.join(''.join(self.buf).split())
+   self.capture=None; self.target=None; self.buf=[]
+
+def search_horoscopes(sign):
+ """Search horoscope pages with DuckDuckGo first, then Bing RSS as a fallback."""
+ today=date.today().strftime('%Y年%m月%d日')
+ query=f'{today} {sign} 今日の運勢 星占い'
+ failures=[]
+ headers={
+  'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36',
+  'Accept-Language':'ja-JP,ja;q=0.9,en;q=0.7',
+ }
+ # 検索先ごとに失敗を切り分け、片方が使えなくてももう片方を試す。
+ engines=[
+  ('DuckDuckGo','https://html.duckduckgo.com/html/?'+urllib.parse.urlencode({'q':query})),
+  ('Bing RSS','https://www.bing.com/search?'+urllib.parse.urlencode({'format':'rss','q':query})),
+ ]
+ for engine,url in engines:
+  try:
+   req=urllib.request.Request(url,headers=headers)
+   with urllib.request.urlopen(req,timeout=15) as response:
+    raw=response.read(1_500_000)
+    charset=response.headers.get_content_charset() or 'utf-8'
+   body=raw.decode(charset,'replace')
+   found=[]
+   if engine=='DuckDuckGo':
+    parser=DDGResults(); parser.feed(body)
+    for item in parser.results:
+     link=item.get('url','')
+     parsed=urllib.parse.urlparse(link)
+     if 'duckduckgo.com' in parsed.netloc:
+      target=urllib.parse.parse_qs(parsed.query).get('uddg',[''])[0]
+      if target: link=urllib.parse.unquote(target)
+     if link.startswith('http') and 'duckduckgo.com' not in urllib.parse.urlparse(link).netloc:
+      found.append({'title':item.get('title','').strip() or link,'url':link,'snippet':item.get('snippet','').strip()})
+   else:
+    root=ET.fromstring(body)
+    for item in root.findall('.//item'):
+     link=(item.findtext('link') or '').strip()
+     title=(item.findtext('title') or '').strip()
+     snippet=(item.findtext('description') or '').strip()
+     if link.startswith('http') and title:
+      # RSS descriptions may contain markup; remove tags and decode entities.
+      snippet=re.sub(r'<[^>]+>',' ',snippet)
+      from html import unescape
+      snippet=' '.join(unescape(snippet).split())
+      found.append({'title':title,'url':link,'snippet':snippet})
+   out=[]; seen=set()
+   for item in found:
+    link=item['url']
+    if link in seen: continue
+    seen.add(link); out.append(item)
+    if len(out)>=6: break
+   if out:
+    print(f'Horoscope search: {engine} returned {len(out)} results')
+    return out
+   failures.append(f'{engine}: no parseable results (HTTP response received)')
+  except Exception as exc:
+   failures.append(f'{engine}: {type(exc).__name__}: {str(exc)[:180]}')
+ print('Horoscope search failed: ' + ' | '.join(failures)[:700])
+ return []
+
+def predict(p):
+ sign=(p['zodiac'] or '').strip()
+ if sign not in ZODIAC_SIGNS:
+  raise ValueError('先に「記憶の管理」で星座を選んで保存してニャ。')
+ if not key(): raise RuntimeError('Gemini APIキーが設定されていません。')
+ today=date.today().strftime('%Y年%m月%d日')
+ results=search_horoscopes(sign)
+ if not results: raise RuntimeError('占いサイトの検索結果を取得できませんでした。ネット接続を確認して、もう一度試してニャ。')
+ source_text='\n'.join(f"{i+1}. {x['title']}\nURL: {x['url']}\n検索結果の説明: {x.get('snippet','（説明文なし）')}" for i,x in enumerate(results))
+ prompt=f'''以下はウェブ検索で見つけた占いサイトの検索結果です。内容に書かれていないことを事実のように作らず、複数の結果に共通する傾向を中心に日本語で要約してください。対象日:{today}、星座:{sign}。全体運・対人運・仕事運/学業運・金運・ラッキーアドバイスを簡潔にまとめてください。検索結果だけでは根拠が足りない項目は「情報なし」としてください。占いは娯楽として楽しむもので、医療・金銭などの重要判断を促さないでください。\n\n検索結果:\n{source_text}'''
+ # Gemini呼び出しは既存の ask() をそのまま使用する。
+ # 要約API側で例外が起きても、取得済み検索結果から簡易まとめを作成する。
+ try:
+  summary=ask(prompt,'あなたは大預言猫ニャル様。愛嬌ある猫の占い師として、やさしく読みやすい日本語で、根拠のない断定を避けて要約する。',tokens=650)
+  if not summary:
+   raise RuntimeError('Gemini returned empty summary')
+ except Exception as exc:
+  msg=str(exc)
+  for n in ('GOOGLE_API_KEY','GEMINI_API_KEY'):
+   v=os.environ.get(n,'').strip()
+   if v: msg=msg.replace(v,'[REDACTED]')
+  print(f'Horoscope summary Gemini failed; using search snippets only: {type(exc).__name__}: {msg[:500]}')
+  snippets=[re.sub(r'\s+',' ',x.get('snippet','')).strip() for x in results]
+  snippets=[x for x in snippets if x]
+  if snippets:
+   summary='検索結果の説明文をもとにした簡易まとめニャ。\n' + '\n'.join(f'・{x[:260]}' for x in snippets[:4]) + '\n\n検索結果の説明文に基づくため、各サイトの本文を確認するとより詳しく読めるニャ。'
+  else:
+   summary='検索結果は見つかったものの、説明文を十分に取得できなかったニャ。下の出典サイトを開いて今日の運勢を確認してほしいニャ。'
+ sources='\n'.join(f"{x['title']}|{x['url']}" for x in results)
+ return f'【{today}・{sign}の今日の運勢】\n{summary}',sources
+@app.before_request
+def csrf():
+ if 'tenant_id' not in session: session['tenant_id']=secrets.token_urlsafe(32)
+ if 'csrf' not in session: session['csrf']=secrets.token_urlsafe(24)
+ init_db()
+@app.context_processor
+def globals():return {'csrf_token':session.get('csrf','')}
+def check():
+ if not secrets.compare_digest(request.form.get('csrf_token',''),session.get('csrf','')):abort(400)
+@app.route('/')
+def index():
+ p=profile()
+ with db() as c: ms=c.execute('SELECT * FROM messages ORDER BY id DESC LIMIT 30').fetchall(); ps=c.execute('SELECT * FROM predictions ORDER BY id DESC LIMIT 5').fetchall()
+ return render_template('index.html',profile=p,messages=list(reversed(ms)),predictions=ps)
+@app.post('/chat')
+def chat():
+ check(); t=request.form.get('message','').strip()
+ if not t:flash('ひとこと入力してニャ。','warning')
+ elif len(t)>1000:flash('メッセージは1,000文字以内にしてニャ。','warning')
+ else:add('user',t);add('cat',reply(t))
+ return redirect(url_for('index'))
+@app.post('/predict')
+def do_predict():
+ check()
+ try: out,sources=predict(profile())
+ except ValueError as e: flash(str(e),'warning');return redirect(url_for('memory'))
+ except Exception as e:
+  msg=str(e)
+  for n in ('GOOGLE_API_KEY','GEMINI_API_KEY'):
+   v=os.environ.get(n,'').strip()
+   if v: msg=msg.replace(v,'[REDACTED]')
+  print(f'Horoscope lookup failed: {type(e).__name__}: {msg[:500]}')
+  flash(msg[:250] if isinstance(e,RuntimeError) else '占いの検索または要約に失敗したニャ。ネット接続とGemini APIを確認してニャ。','warning')
+  return redirect(url_for('index'))
+ with db() as c:c.execute('INSERT INTO predictions(prediction,sources,created_at) VALUES(?,?,?)',(out,sources,datetime.now().strftime('%Y-%m-%d %H:%M')))
+ add('cat',out);flash('ネットの占いサイトを調べて、今日の運勢をまとめたニャ！','success');return redirect(url_for('index'))
+@app.post('/prediction/<int:pid>/result')
+def result(pid):
+ check(); r=request.form.get('result',''); reacts={'当たった':'当然である！余の予言が外れるわけがないニャ！','惜しい':'宇宙の誤差範囲では的中である！','外れた':'現実のほうが予言に追いついていないだけニャ！'}
+ if r not in reacts:abort(400)
+ with db() as c:
+  if not c.execute('SELECT id FROM predictions WHERE id=?',(pid,)).fetchone():abort(404)
+  c.execute('UPDATE predictions SET result=? WHERE id=?',(r,pid))
+ add('cat',reacts[r]);flash('結果を記録したニャ。','success');return redirect(url_for('index'))
+@app.route('/memory',methods=['GET','POST'])
+def memory():
+ if request.method=='POST':
+  check(); f={n:request.form.get(n,'').strip() for n in ('username','hobbies','preferences','thinking_style','notes','zodiac')}
+  limits={'username':80,'hobbies':1000,'preferences':1000,'thinking_style':1000,'notes':1500,'zodiac':20}
+  if f['zodiac'] and f['zodiac'] not in ZODIAC_SIGNS: flash('星座の選択が正しくないニャ。','warning');return redirect(url_for('memory'))
+  for n,v in f.items():
+   if len(v)>limits[n]:flash(f'{n}が長すぎるニャ。','warning');return redirect(url_for('memory'))
+  with db() as c:c.execute('UPDATE profile SET username=?,hobbies=?,preferences=?,thinking_style=?,notes=?,zodiac=?,updated_at=? WHERE id=1',(*f.values(),datetime.now().strftime('%Y-%m-%d %H:%M')))
+  flash('記憶を保存したニャ。','success');return redirect(url_for('memory'))
+ return render_template('memory.html',profile=profile())
+@app.post('/memory/delete')
+def delete_memory():
+ check()
+ with db() as c:c.execute("UPDATE profile SET username='',hobbies='',preferences='',thinking_style='',notes='',zodiac='',updated_at=? WHERE id=1",(datetime.now().strftime('%Y-%m-%d %H:%M'),))
+ flash('プロフィールの記憶を消去したニャ。','success');return redirect(url_for('memory'))
+@app.post('/history/delete')
+def delete_history():
+ check()
+ with db() as c:c.execute('DELETE FROM messages');c.execute('DELETE FROM predictions')
+ flash('会話履歴と予言履歴を消去したニャ。','success');return redirect(url_for('index'))
+if __name__=='__main__':
+ print('大預言猫ニャル様: http://127.0.0.1:5000');app.run(host='127.0.0.1',port=5000,debug=False)

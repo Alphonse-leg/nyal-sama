@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}アプリについて｜大預言猫ニャル様{% endblock %}
+{% block content %}
+<section class="panel" style="max-width:760px;margin:24px auto;">
+  <p class="eyebrow">ABOUT THIS APP</p>
+  <h1>アプリについて</h1>
+  <h2>大預言猫ニャル様</h2>
+  <p>ニャル様との会話や、今日の運勢を気軽に楽しむためのアプリです。</p>
+  <p>占い・予言は娯楽としてお楽しみください。重要な判断は、ご自身で情報を確認したうえで行ってください。</p>
+  <hr>
+  <h3>著作制作</h3>
+  <p>小澤保則</p>
+  <h3>お問い合わせ</h3>
+  <p><a href="mailto:yasunoriozawa@gmail.com">yasunoriozawa@gmail.com</a></p>
+  <p><a href="{{ url_for('index') }}">← トップページへ戻る</a></p>
+</section>
+{% endblock %}

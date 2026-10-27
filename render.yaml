@@ -1,16 +1,7 @@
 services:
   - type: web
-    name: nyalsama
+    name: nyal-sama
     runtime: python
-    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.8
-      - key: NYALSAMA_SECRET_KEY
-        generateValue: true
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+    plan: free

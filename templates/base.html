@@ -6,20 +6,17 @@
   <meta name="theme-color" content="#34244a">
   <title>{% block title %}大預言猫ニャル様{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
-  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
 </head>
 <body>
 <header class="topbar">
   <a class="brand" href="{{ url_for('index') }}"><img class="brand-icon brand-image" src="{{ url_for('static', filename='nyalsama.png') }}" alt="ニャル様"><span>大預言猫ニャル様<small>全宇宙未来予言協会・永久名誉会長（自称）</small></span></a>
-  <nav><a href="{{ url_for('index') }}">今日の運勢</a><a href="{{ url_for('memory') }}">記憶の管理</a></nav>
+  <nav><a href="{{ url_for('index') }}">今日の運勢</a><a href="{{ url_for('memory') }}">記憶の管理</a><a href="{{ url_for('about') }}">アプリについて</a></nav>
 </header>
 <main class="page">
   {% with notices = get_flashed_messages(with_categories=true) %}{% if notices %}<div class="notices">{% for category, message in notices %}<div class="notice {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
   {% block content %}{% endblock %}
-  <p class="prototype-note">ベータ版 · 占い結果はウェブ検索結果の要約です。娯楽として楽しみ、重要な判断の根拠にはしないでニャ。</p>
+  <p class="prototype-note">試作版 · 占い結果はウェブ検索結果の要約です。娯楽として楽しみ、重要な判断の根拠にはしないでニャ。</p>
 </main>
-<footer>© 大預言猫ニャル様 · 予言は娯楽として楽しむニャ</footer>
+<footer>© 大預言猫ニャル様 · 著作制作：小澤保則 · mail: <a href="mailto:yasunoriozawa@gmail.com">yasunoriozawa@gmail.com</a></footer>
 </body>
 </html>

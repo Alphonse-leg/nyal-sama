@@ -12,12 +12,7 @@ DB=os.path.join(BASE,'nyalsama.db')
 MODEL=os.environ.get('GEMINI_MODEL','gemini-3.7-flash').strip()
 app=Flask(__name__); app.secret_key=os.environ.get('NYALSAMA_SECRET_KEY') or secrets.token_hex(32)
 def db():
- # Browser-session scoped database: visitors do not share profile/chat history.
- tenant = session.get('tenant_id', 'bootstrap')
- safe = hashlib.sha256(tenant.encode('utf-8')).hexdigest()[:24]
- path = os.path.join(BASE, 'data', f'nyalsama_{safe}.db')
- os.makedirs(os.path.dirname(path), exist_ok=True)
- c=sqlite3.connect(path); c.row_factory=sqlite3.Row; return c
+ c=sqlite3.connect(DB); c.row_factory=sqlite3.Row; return c
 def init_db():
  with db() as c:
   c.executescript("""CREATE TABLE IF NOT EXISTS profile(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT NOT NULL DEFAULT '',hobbies TEXT NOT NULL DEFAULT '',preferences TEXT NOT NULL DEFAULT '',thinking_style TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '');
@@ -190,13 +185,15 @@ def predict(p):
  return f'【{today}・{sign}の今日の運勢】\n{summary}',sources
 @app.before_request
 def csrf():
- if 'tenant_id' not in session: session['tenant_id']=secrets.token_urlsafe(32)
- if 'csrf' not in session: session['csrf']=secrets.token_urlsafe(24)
- init_db()
+ if 'csrf' not in session:session['csrf']=secrets.token_urlsafe(24)
 @app.context_processor
 def globals():return {'csrf_token':session.get('csrf','')}
 def check():
  if not secrets.compare_digest(request.form.get('csrf_token',''),session.get('csrf','')):abort(400)
+@app.route('/about')
+def about():
+ return render_template('about.html')
+
 @app.route('/')
 def index():
  p=profile()
@@ -254,4 +251,4 @@ def delete_history():
  with db() as c:c.execute('DELETE FROM messages');c.execute('DELETE FROM predictions')
  flash('会話履歴と予言履歴を消去したニャ。','success');return redirect(url_for('index'))
 if __name__=='__main__':
- print('大預言猫ニャル様: http://127.0.0.1:5000');app.run(host='127.0.0.1',port=5000,debug=False)
+ init_db();print('大預言猫ニャル様: http://127.0.0.1:5000');print('ローカル利用専用です。既存の nyalsama.db をこのフォルダーに置くと履歴を引き継ぎます。');app.run(host='127.0.0.1',port=5000,debug=False)
